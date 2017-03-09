@@ -2,6 +2,7 @@
 #include "Wire.h"                 
 #include "I2Cdev.h"
 #include "MPU6050_6Axis_MotionApps20.h"
+#include "DualMC33926MotorShield.h"
 
 #define MPU_INT 2//0
 #define PWM_L 10
@@ -23,6 +24,9 @@ float K = -60.0f;
 float B = -60.0f;
 float angle_ref = 0.0f;
 
+int pwm_left;
+int pwm_right;
+
 MPU6050 mpu;
 // orientation/motion vars
 Quaternion q;           // [w, x, y, z]         quaternion container
@@ -37,6 +41,9 @@ uint8_t devStatus;      // return status after each device operation (0 = succes
 uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
 uint16_t fifoCount;     // count of all bytes currently in FIFO
 uint8_t fifoBuffer[64]; // FIFO storage buffer
+
+// Motor driver
+DualMC33926MotorShield md;
 
 volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
 void dmpDataReady()
@@ -160,19 +167,27 @@ void loop() {
     // angle and angular rate unit: radian
     float angle_err = ypr[1] + angle_ref;               // angle_ref is center of gravity offset
     double angular_rate = -((double)gyro[1]/131.0);     // converted to radians
+    Serial.print("Error, rate: ");
+    Serial.print(angle_err);
+    Serial.print(", ");
+    Serial.println(angle_ref);
 
     displayYPR();
     
     float deltaPWM = K*angle_err + B*angular_rate + translate_velocity;
-    static int pwm_left;
+    Serial.print("Delta PWM: ");
+    Serial.println(deltaPWM);
     pwm_left += deltaPWM + turn_velocity;
-    static int pwm_right;
     pwm_right += deltaPWM - turn_velocity;
 
-    Serial.println(pwm_left);
+    Serial.print("Motor Power: ");
+    Serial.print(pwm_left);
+    Serial.print("\t");
+    Serial.println(pwm_right);
 
     // Control motor
-    pwm_out(pwm_left, pwm_right);
+    //pwm_out(pwm_left, pwm_right);
+    md.setSpeeds(pwm_left, pwm_right);
   }
 }
 
@@ -188,7 +203,6 @@ void displayYPR() {
   Serial.print("\t");
   Serial.println(ypr[2] * 180/M_PI);
 }
-
 
 void pwm_out(int l_val,int r_val)
 {
