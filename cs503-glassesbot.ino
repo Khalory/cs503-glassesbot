@@ -19,10 +19,14 @@
 float translate_velocity = 0.0f;
 float turn_velocity = 0.0f;
 
-float gravity_offset = 0.2f;
-float K = -60.0f;
-float B = -60.0f;
-float angle_ref = 0.0f;
+// 28, 22 work pretty well
+// 45, 26 works best so far
+// 55, 38 was decent but wobly
+// 55, 25 is pretty pretty
+float K = 55.0f;
+float B = 30.0f;
+float angle_ref = 0.27000f; // LAST: .25618
+float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
 int pwm_left;
 int pwm_right;
@@ -77,6 +81,7 @@ void setup() {
     // initialize device
     Serial.println(F("Initializing I2C devices..."));
     mpu.initialize();
+    md.init();
     pinMode(2, INPUT);
 
     // verify connection
@@ -84,13 +89,13 @@ void setup() {
     Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
 
     // wait for ready
-    Serial.println(F("\nSend any character to begin DMP programming and demo: "));
-    while (Serial.available() && Serial.read()); // empty buffer
-    while (!Serial.available());                 // wait for data
-    while (Serial.available() && Serial.read()); // empty buffer again
+    //Serial.println(F("\nSend any character to begin DMP programming and demo: "));
+    //while (Serial.available() && Serial.read()); // empty buffer
+    //while (!Serial.available());                 // wait for data
+    //while (Serial.available() && Serial.read()); // empty buffer again
 
     // load and configure the DMP
-    Serial.println(F("Initializing DMP..."));
+    //Serial.println(F("Initializing DMP..."));
     devStatus = mpu.dmpInitialize();
 
     // supply your own gyro offsets here, scaled for min sensitivity
@@ -111,7 +116,7 @@ void setup() {
         mpuIntStatus = mpu.getIntStatus();
 
         // set our DMP Ready flag so the main loop() function knows it's okay to use it
-        Serial.println(F("DMP ready! Waiting for first interrupt..."));
+        //Serial.println(F("DMP ready! Waiting for first interrupt..."));
         dmpReady = true;
 
         // get expected DMP packet size for later comparison
@@ -165,29 +170,47 @@ void loop() {
     mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
     
     // angle and angular rate unit: radian
-    float angle_err = ypr[1] + angle_ref;               // angle_ref is center of gravity offset
+    float angle_err = ypr[1] - angle_ref;               // angle_ref is center of gravity offset
     double angular_rate = -((double)gyro[1]/131.0);     // converted to radians
-    Serial.print("Error, rate: ");
-    Serial.print(angle_err);
-    Serial.print(", ");
-    Serial.println(angle_ref);
+    //Serial.println(ypr[1]);
+    //Serial.print(", ");
+    //Serial.print(angle_err);
+    //Serial.println();
+    //Serial.print("Error, rate: ");
+    //Serial.print(angle_err);
+    //Serial.print(", ");
+    //Serial.println(angle_ref);
 
-    displayYPR();
+    //displayYPR();
     
-    float deltaPWM = K*angle_err + B*angular_rate + translate_velocity;
-    Serial.print("Delta PWM: ");
-    Serial.println(deltaPWM);
+    float deltaPWM = K*angle_err - B*angular_rate + translate_velocity;
+    //Serial.print("K: ");
+    //Serial.println(K*angle_err);
+    //Serial.print("B: ");
+    //Serial.println(-B*angular_rate);
+    //Serial.print("Delta PWM: ");
+    //Serial.println(deltaPWM);
     pwm_left += deltaPWM + turn_velocity;
     pwm_right += deltaPWM - turn_velocity;
 
-    Serial.print("Motor Power: ");
-    Serial.print(pwm_left);
-    Serial.print("\t");
-    Serial.println(pwm_right);
+    int max_speed = 300;
+    if (pwm_left > max_speed)
+      pwm_left = max_speed;
+    if (pwm_right > max_speed)
+      pwm_right = max_speed;
+    if (pwm_left < -max_speed)
+      pwm_left = -max_speed;
+    if (pwm_right < -max_speed)
+      pwm_right = -max_speed;
+
+    //Serial.print("Motor Power: ");
+    //Serial.print(pwm_left);
+    //Serial.print("\t");
+    //Serial.println(pwm_right);
 
     // Control motor
     //pwm_out(pwm_left, pwm_right);
-    md.setSpeeds(pwm_left, pwm_right);
+    md.setSpeeds(pwm_left, pwm_right*wheel_rate_correction);
   }
 }
 
