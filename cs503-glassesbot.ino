@@ -23,9 +23,9 @@ float turn_velocity = 0.0f;
 // 45, 26 works best so far
 // 55, 38 was decent but wobly
 // 55, 25 is pretty pretty
-float K = 55.0f;
-float B = 30.0f;
-float angle_ref = 0.27000f; // LAST: .25618
+float K = 20.0f;
+float B = 10.0f;
+float angle_ref = 0.26f;
 float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
 int pwm_left;
@@ -55,7 +55,17 @@ void dmpDataReady()
   mpuInterrupt = true;
 }
 
+const int MPU_addr=0x68;  // I2C address of the MPU-6050
 void setup() {
+    Serial.begin(115200);
+    while (!Serial); // wait for Leonardo enumeration, others continue immediately
+  Wire.begin();
+  Wire.beginTransmission(MPU_addr);
+  Serial.println("l");
+  Wire.write(0x6B);  // PWR_MGMT_1 register
+  Wire.write(0);     // set to zero (wakes up the MPU-6050)
+  Wire.endTransmission(true);
+  Serial.println("k");
     // join I2C bus (I2Cdev library doesn't do this automatically)
     #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
         Wire.begin();
@@ -69,8 +79,6 @@ void setup() {
     // initialize serial communication
     // (115200 chosen because it is required for Teapot Demo output, but it's
     // really up to you depending on your project)
-    Serial.begin(115200);
-    while (!Serial); // wait for Leonardo enumeration, others continue immediately
 
     // NOTE: 8MHz or slower host processors, like the Teensy @ 3.3v or Ardunio
     // Pro Mini running at 3.3v, cannot handle this baud rate reliably due to
@@ -136,7 +144,7 @@ void setup() {
 void loop() {
   // if programming failed, don't try to do anything
   if (!dmpReady) return;
-  while (!mpuInterrupt && fifoCount < packetSize) {
+  /*while (!mpuInterrupt) {
     
   }
   // reset interrupt flag and get INT_STATUS byte
@@ -211,7 +219,48 @@ void loop() {
     // Control motor
     //pwm_out(pwm_left, pwm_right);
     md.setSpeeds(pwm_left, pwm_right*wheel_rate_correction);
-  }
+  }*/
+  mpu.getFIFOBytes(fifoBuffer, packetSize);
+  //Get sensor data
+  quaternion(&q, fifoBuffer);
+  mpu.dmpGetGyro(gyro, fifoBuffer);
+  getGravity(&gravity, &q);
+  YPR(ypr, &q, &gravity);
+  Serial.println("--");
+  Serial.println(ypr[1]);
+  Serial.println(gyro[1]);
+  // angle and angular rate unit: radian
+  float angle_err = ypr[1] - angle_ref;               // angle_ref is center of gravity offset
+  double angular_rate = -((double)gyro[1]/131.0);     // converted to radians
+    
+  float deltaPWM = K*angle_err - B*angular_rate + translate_velocity;
+  //Serial.print("K: ");
+  //Serial.println(K*angle_err);
+  //Serial.print("B: ");
+  //Serial.println(-B*angular_rate);
+  //Serial.print("Delta PWM: ");
+  //Serial.println(deltaPWM);
+  pwm_left += deltaPWM + turn_velocity;
+  pwm_right += deltaPWM - turn_velocity;
+
+  int max_speed = 300;
+  if (pwm_left > max_speed)
+    pwm_left = max_speed;
+  if (pwm_right > max_speed)
+    pwm_right = max_speed;
+  if (pwm_left < -max_speed)
+    pwm_left = -max_speed;
+  if (pwm_right < -max_speed)
+    pwm_right = -max_speed;
+
+  //Serial.print("Motor Power: ");
+  //Serial.print(pwm_left);
+  //Serial.print("\t");
+  //Serial.println(pwm_right);
+
+  // Control motor
+  //pwm_out(pwm_left, pwm_right);
+  md.setSpeeds(pwm_left, pwm_right*wheel_rate_correction);
 }
 
 void displayYPR() {
@@ -258,6 +307,70 @@ void pwm_out(int l_val,int r_val)
   analogWrite(PWM_R, r_val>255? 255:r_val);
 }
 
+void getData(uint8_t *data) {
+  /*Wire.beginTransmission(MPU_addr);
+  Wire.write(0x3B);  // starting with register 0x3B (ACCEL_XOUT_H)
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU_addr, 42, true);  // request a total of 14 registers
+  AcX=Wire.read()<<8|Wire.read();  // 0x3B (ACCEL_XOUT_H) & 0x3C (ACCEL_XOUT_L)    
+  AcY=Wire.read()<<8|Wire.read();  // 0x3D (ACCEL_YOUT_H) & 0x3E (ACCEL_YOUT_L)
+  AcZ=Wire.read()<<8|Wire.read();  // 0x3F (ACCEL_ZOUT_H) & 0x40 (ACCEL_ZOUT_L)
+  Tmp=Wire.read()<<8|Wire.read();  // 0x41 (TEMP_OUT_H) & 0x42 (TEMP_OUT_L)
+  GyX=Wire.read()<<8|Wire.read();  // 0x43 (GYRO_XOUT_H) & 0x44 (GYRO_XOUT_L)
+  GyY=Wire.read()<<8|Wire.read();  // 0x45 (GYRO_YOUT_H) & 0x46 (GYRO_YOUT_L)
+  GyZ=Wire.read()<<8|Wire.read();  // 0x47 (GYRO_ZOUT_H) & 0x48 (GYRO_ZOUT_L)*/
+  readBytes(MPU_addr, 0x74, 42, data);
+}
+
+void readBytes(uint8_t devAddr, uint8_t regAddr, uint8_t length, uint8_t *data) {
+  Wire.beginTransmission(devAddr);
+  Wire.write(regAddr);
+  Wire.endTransmission();
+  Wire.beginTransmission(devAddr);
+  Wire.requestFrom(devAddr, (uint8_t)min(length, BUFFER_LENGTH));
+
+    int8_t count = 0;
+  for (; Wire.available(); count++) {
+      data[count] = Wire.read();
+      #ifdef I2CDEV_SERIAL_DEBUG
+          Serial.print(data[count], HEX);
+          if (count + 1 < length) Serial.print(" ");
+      #endif
+  }
+
+  Wire.endTransmission();
+}
+
+uint8_t *dmpPacketBuffer;
+void quaternion(Quaternion *q, const uint8_t* packet) {
+    // TODO: accommodate different arrangements of sent data (ONLY default supported now)
+    int16_t qI[4];
+    if (packet == 0) packet = dmpPacketBuffer;
+    qI[0] = ((packet[0] << 8) | packet[1]);
+    qI[1] = ((packet[4] << 8) | packet[5]);
+    qI[2] = ((packet[8] << 8) | packet[9]);
+    qI[3] = ((packet[12] << 8) | packet[13]);
+    
+    q -> w = (float)qI[0] / 16384.0f;
+    q -> x = (float)qI[1] / 16384.0f;
+    q -> y = (float)qI[2] / 16384.0f;
+    q -> z = (float)qI[3] / 16384.0f;
+}
+
+void getGravity(VectorFloat *v, Quaternion *q) {
+    v -> x = 2 * (q -> x*q -> z - q -> w*q -> y);
+    v -> y = 2 * (q -> w*q -> x + q -> y*q -> z);
+    v -> z = q -> w*q -> w - q -> x*q -> x - q -> y*q -> y + q -> z*q -> z;
+}
+
+void YPR(float *data, Quaternion *q, VectorFloat *gravity) {
+    // yaw: (about Z axis)
+    data[0] = atan2(2*q -> x*q -> y - 2*q -> w*q -> z, 2*q -> w*q -> w + 2*q -> x*q -> x - 1);
+    // pitch: (nose up/down, about Y axis)
+    data[1] = atan(gravity -> x / sqrt(gravity -> y*gravity -> y + gravity -> z*gravity -> z));
+    // roll: (tilt left/right, about X axis)
+    data[2] = atan(gravity -> y / sqrt(gravity -> x*gravity -> x + gravity -> z*gravity -> z));
+}
 
 void init_IO()
 {
