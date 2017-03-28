@@ -16,6 +16,16 @@
 #define SPD_INT_R 4//7
 #define SPD_PUL_R 5
 
+// Left encoder
+#define IR_1 2
+#define IR_2 4
+// Right encoder
+#define IR_3 3
+#define IR_4 5
+// Pins 2 and 3 correspond to interrupts 0 and 1, respectively
+#define IR_INTERRUPT_1 0
+#define IR_INTERRUPT_2 1
+
 // Stores the total number of steps for both encoders
 volatile long leftEncoder = 0;
 volatile long rightEncoder = 0;
@@ -39,9 +49,10 @@ float turn_velocity = 0.0f;
 // 45, 26 works best so far
 // 55, 38 was decent but wobly
 // 55, 25 is pretty pretty
-float K = 12.0f;
-float B = 0.5f;
-float angle_ref = 0.02f;
+float K = 58.0f;
+float B = 36.0f;
+float angle_ref = 0.27f;
+float angular_rate_ref = 2.14f;
 float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
 int pwm_left;
@@ -79,13 +90,7 @@ void setup() {
     mpu.initialize();
     md.init();
     init_IR();
-    pinMode(2, INPUT);
 
-    // supply your own gyro offsets here, scaled for min sensitivity
-    //mpu.setXGyroOffset(220);
-    //mpu.setYGyroOffset(76);
-    //mpu.setZGyroOffset(-85);
-    //mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
     mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
 }
 
@@ -93,11 +98,11 @@ void loop() {
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
   getPitch(&pitch, &ax, &az);
   // angle and angular rate unit: radian
-  float angle_err = pitch - angle_ref;               // angle_ref is center of gravity offset
-  double angular_rate = PI*((double)gy)/180;     // converted to radians
+  double angle_err = pitch - angle_ref;               // angle_ref is center of gravity offset
+  double angular_rate = PI*((double)gy)/180 - angular_rate_ref;     // converted to radians
   
   float deltaPWM = K*angle_err - B*angular_rate;
-  printPitchAngleAndSpeed(&pitch, &angular_rate);
+  printAngleErrorAndSpeed(&angle_err, &angular_rate);
   //printDeltaPWMEquation(&deltaPWM, &K, &pitch, &angle_ref, &B, &gy);
   
   pwm_left += deltaPWM;
@@ -114,12 +119,12 @@ void loop() {
     pwm_right = -max_speed;
 
   //Control motor
-  md.setSpeeds(pwm_left/5, pwm_right*wheel_rate_correction/5);
+  md.setSpeeds(pwm_left, pwm_right*wheel_rate_correction);
 }
 
-const int xOffset = 0;
-const int zOffset = 0;
 void getPitch(double *pitch, int16_t *ax, int16_t *az) {
+  // Just using atan2 gives us an angle where a balanced position reads as either PI or -PI
+  // Inverted so it's in the same direction as the gyro
   *pitch = -atan2(*ax, *az) - PI;
   if (*pitch < -PI)
     *pitch += 2*PI;
@@ -128,12 +133,12 @@ void getPitch(double *pitch, int16_t *ax, int16_t *az) {
 // Initializing IR pins and interrupts
 void init_IR()
 {
-  pinMode(2, INPUT);
-  pinMode(3, INPUT);
-  pinMode(4, INPUT);
-  pinMode(5, INPUT);
-  attachInterrupt(0, encoder_one, CHANGE);
-  attachInterrupt(1, encoder_two, CHANGE);
+  pinMode(IR_1, INPUT);
+  pinMode(IR_2, INPUT);
+  pinMode(IR_3, INPUT);
+  pinMode(IR_4, INPUT);
+  attachInterrupt(IR_INTERRUPT_1, encoder_one, CHANGE);
+  attachInterrupt(IR_INTERRUPT_2, encoder_two, CHANGE);
 }
 
 // IR interrupts for the quadrature encoders
@@ -196,38 +201,6 @@ void updateCoords() {
   worldY += dsavg * sin(worldTheta);
 }
 
-void pwm_out(int l_val,int r_val)
-{
-  if (l_val<0)
-  {
-    digitalWrite(DIR_L1, HIGH);
-    digitalWrite(DIR_L2, LOW);
-    l_val=-l_val;
-  }
-  else
-  {
-    digitalWrite(DIR_L1, LOW);
-    digitalWrite(DIR_L2, HIGH);
-  }
-  
-  if (r_val<0)
-  {
-    digitalWrite(DIR_R1, HIGH);
-    digitalWrite(DIR_R2, LOW);
-    r_val=-r_val;
-  }
-  else
-  {
-    digitalWrite(DIR_R1, LOW);
-    digitalWrite(DIR_R2, HIGH);
-  }
-  l_val=l_val+5;
-  r_val=r_val+30;
-  analogWrite(PWM_L, l_val>255? 255:l_val);
-  analogWrite(PWM_R, r_val>255? 255:r_val);
-}
-
-
 void init_IO()
 {
   // configure I/O
@@ -261,9 +234,9 @@ void printDeltaPWMEquation(float *deltaPWM, float *K, double *pitch, float *angl
   Serial.println();
 }
 
-void printPitchAngleAndSpeed(double *pitch, double *angular_rate) {
-  Serial.print("pitch, angular_rate = ");
-  Serial.print(*pitch);
+void printAngleErrorAndSpeed(double *angle_err, double *angular_rate) {
+  Serial.print("angle_err, angular_rate = ");
+  Serial.print(*angle_err);
   Serial.print(", ");
   Serial.println(*angular_rate);
 }
