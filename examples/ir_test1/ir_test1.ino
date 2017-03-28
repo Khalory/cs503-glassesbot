@@ -1,8 +1,10 @@
-volatile long enc_count = 0;
+
+volatile long leftEncoder = 0;
+volatile long rightEncoder = 0;
 
 void setup()
 {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   pinMode(2, INPUT);
   pinMode(3, INPUT);
@@ -31,9 +33,9 @@ void encoder_one()
   pins = (pins & 0b1) | ((pins >> 1) & 0b10);
   enc_val = enc_val | pins;
 
-  enc_count = enc_count + lookup_table[enc_val & 0b1111];
-  Serial.print("Total position: ");
-  Serial.println(enc_count);
+  leftEncoder += lookup_table[enc_val & 0b1111];
+  //Serial.print("Left position: ");
+  //Serial.println(leftEncoder);
 }
 
 void encoder_two()
@@ -50,9 +52,9 @@ void encoder_two()
   pins = (pins & 0b1) | ((pins >> 1) & 0b10);
   enc_val = enc_val | pins;
 
-  enc_count = enc_count + lookup_table[enc_val & 0b1111];
-  Serial.print("Total position: ");
-  Serial.println(enc_count);
+  rightEncoder += lookup_table[enc_val & 0b1111];
+  //Serial.print("Right position: ");
+  //Serial.println(rightEncoder);
 }
 
 // For debugging

@@ -16,6 +16,22 @@
 #define SPD_INT_R 4//7
 #define SPD_PUL_R 5
 
+// Stores the total number of steps for both encoders
+volatile long leftEncoder = 0;
+volatile long rightEncoder = 0;
+// Tracks the number of steps since the last world position update
+volatile int leftSteps = 0;
+volatile int rightSteps = 0;
+const int stepsPerUpdate = 3;
+
+const float botRadius = 1.375f;
+const float stepDistance = 2.0f * botRadius * PI / 64.0f;
+
+// World Coordinates
+float worldX = 0.0f;
+float worldY = 0.0f;
+float worldTheta = 0.0f;
+
 float translate_velocity = 0.0f;
 float turn_velocity = 0.0f;
 
@@ -23,37 +39,26 @@ float turn_velocity = 0.0f;
 // 45, 26 works best so far
 // 55, 38 was decent but wobly
 // 55, 25 is pretty pretty
-float K = 55.0f;
-float B = 30.0f;
-float angle_ref = 0.27000f; // LAST: .25618
+float K = 12.0f;
+float B = 0.5f;
+float angle_ref = 0.02f;
 float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
 int pwm_left;
 int pwm_right;
 
 MPU6050 mpu;
-// orientation/motion vars
-Quaternion q;           // [w, x, y, z]         quaternion container
-VectorFloat gravity;    // [x, y, z]            gravity vector
-int16_t gyro[3];        // [x, y, z]            gyro vector
-float ypr[3];           // [yaw, pitch, roll]   yaw/pitch/roll container and gravity vector
 
-// MPU control/status vars
-bool dmpReady = false;  // set true if DMP init was successful
-uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
-uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // expected DMP packet size (default is 42 bytes)
-uint16_t fifoCount;     // count of all bytes currently in FIFO
-uint8_t fifoBuffer[64]; // FIFO storage buffer
+int16_t ax;
+int16_t ay;
+int16_t az;
+int16_t gx;
+int16_t gy;
+int16_t gz;
+double pitch;
 
 // Motor driver
 DualMC33926MotorShield md;
-
-volatile bool mpuInterrupt = false;     // indicates whether MPU interrupt pin has gone high
-void dmpDataReady()
-{
-  mpuInterrupt = true;
-}
 
 void setup() {
     // join I2C bus (I2Cdev library doesn't do this automatically)
@@ -67,164 +72,128 @@ void setup() {
     init_IO();
 
     // initialize serial communication
-    // (115200 chosen because it is required for Teapot Demo output, but it's
-    // really up to you depending on your project)
     Serial.begin(115200);
     while (!Serial); // wait for Leonardo enumeration, others continue immediately
 
-    // NOTE: 8MHz or slower host processors, like the Teensy @ 3.3v or Ardunio
-    // Pro Mini running at 3.3v, cannot handle this baud rate reliably due to
-    // the baud timing being too misaligned with processor ticks. You must use
-    // 38400 or slower in these cases, or use some kind of external separate
-    // crystal solution for the UART timer.
-
     // initialize device
-    Serial.println(F("Initializing I2C devices..."));
     mpu.initialize();
     md.init();
+    init_IR();
     pinMode(2, INPUT);
 
-    // verify connection
-    Serial.println(F("Testing device connections..."));
-    Serial.println(mpu.testConnection() ? F("MPU6050 connection successful") : F("MPU6050 connection failed"));
-
-    // wait for ready
-    //Serial.println(F("\nSend any character to begin DMP programming and demo: "));
-    //while (Serial.available() && Serial.read()); // empty buffer
-    //while (!Serial.available());                 // wait for data
-    //while (Serial.available() && Serial.read()); // empty buffer again
-
-    // load and configure the DMP
-    //Serial.println(F("Initializing DMP..."));
-    devStatus = mpu.dmpInitialize();
-
     // supply your own gyro offsets here, scaled for min sensitivity
-    mpu.setXGyroOffset(220);
-    mpu.setYGyroOffset(76);
-    mpu.setZGyroOffset(-85);
-    mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
-
-    // make sure it worked (returns 0 if so)
-    if (devStatus == 0) {
-        // turn on the DMP, now that it's ready
-        Serial.println(F("Enabling DMP..."));
-        mpu.setDMPEnabled(true);
-
-        // enable Arduino interrupt detection
-        Serial.println(F("Enabling interrupt detection (Arduino external interrupt 0)..."));
-        attachInterrupt(digitalPinToInterrupt(2), dmpDataReady, RISING);
-        mpuIntStatus = mpu.getIntStatus();
-
-        // set our DMP Ready flag so the main loop() function knows it's okay to use it
-        //Serial.println(F("DMP ready! Waiting for first interrupt..."));
-        dmpReady = true;
-
-        // get expected DMP packet size for later comparison
-        packetSize = mpu.dmpGetFIFOPacketSize();
-    } else {
-        // ERROR!
-        // 1 = initial memory load failed
-        // 2 = DMP configuration updates failed
-        // (if it's going to break, usually the code will be 1)
-        Serial.print(F("DMP Initialization failed (code "));
-        Serial.print(devStatus);
-        Serial.println(F(")"));
-    }
-  
+    //mpu.setXGyroOffset(220);
+    //mpu.setYGyroOffset(76);
+    //mpu.setZGyroOffset(-85);
+    //mpu.setZAccelOffset(1788); // 1688 factory default for my test chip
+    mpu.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
 }
 
 void loop() {
-  // if programming failed, don't try to do anything
-  if (!dmpReady) return;
-  while (!mpuInterrupt && fifoCount < packetSize) {
-    
-  }
-  // reset interrupt flag and get INT_STATUS byte
-  mpuInterrupt = false;
-  mpuIntStatus = mpu.getIntStatus();
+  mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+  getPitch(&pitch, &ax, &az);
+  // angle and angular rate unit: radian
+  float angle_err = pitch - angle_ref;               // angle_ref is center of gravity offset
+  double angular_rate = PI*((double)gy)/180;     // converted to radians
   
-  // get current FIFO count
-  fifoCount = mpu.getFIFOCount();
+  float deltaPWM = K*angle_err - B*angular_rate;
+  printPitchAngleAndSpeed(&pitch, &angular_rate);
+  //printDeltaPWMEquation(&deltaPWM, &K, &pitch, &angle_ref, &B, &gy);
   
-  // check for overflow (this should never happen unless our code is too inefficient)
-  if ((mpuIntStatus & 0x10) || fifoCount == 1024)
-  {
-    // reset so we can continue cleanly
-    mpu.resetFIFO();
-    Serial.println(F("FIFO overflow!"));
-    // otherwise, check for DMP data ready interrupt (this should happen frequently)
-  }
-  else if (mpuIntStatus & 0x02)
-  {
-    // wait for correct available data length, should be a VERY short wait
-    while (fifoCount < packetSize) fifoCount = mpu.getFIFOCount();
-    // read a packet from FIFO
-    mpu.getFIFOBytes(fifoBuffer, packetSize);
-    // track FIFO count here in case there is > 1 packet available
-    // (this lets us immediately read more without waiting for an interrupt)
-    fifoCount -= packetSize;
-    //Get sensor data
-    mpu.dmpGetQuaternion(&q, fifoBuffer);
-    mpu.dmpGetGyro(gyro, fifoBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
-    mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-    
-    // angle and angular rate unit: radian
-    float angle_err = ypr[1] - angle_ref;               // angle_ref is center of gravity offset
-    double angular_rate = -((double)gyro[1]/131.0);     // converted to radians
-    //Serial.println(ypr[1]);
-    //Serial.print(", ");
-    //Serial.print(angle_err);
-    //Serial.println();
-    //Serial.print("Error, rate: ");
-    //Serial.print(angle_err);
-    //Serial.print(", ");
-    //Serial.println(angle_ref);
+  pwm_left += deltaPWM;
+  pwm_right += deltaPWM;
 
-    //displayYPR();
-    
-    float deltaPWM = K*angle_err - B*angular_rate + translate_velocity;
-    //Serial.print("K: ");
-    //Serial.println(K*angle_err);
-    //Serial.print("B: ");
-    //Serial.println(-B*angular_rate);
-    //Serial.print("Delta PWM: ");
-    //Serial.println(deltaPWM);
-    pwm_left += deltaPWM + turn_velocity;
-    pwm_right += deltaPWM - turn_velocity;
+  int max_speed = 300;
+  if (pwm_left > max_speed)
+    pwm_left = max_speed;
+  if (pwm_right > max_speed)
+    pwm_right = max_speed;
+  if (pwm_left < -max_speed)
+    pwm_left = -max_speed;
+  if (pwm_right < -max_speed)
+    pwm_right = -max_speed;
 
-    int max_speed = 300;
-    if (pwm_left > max_speed)
-      pwm_left = max_speed;
-    if (pwm_right > max_speed)
-      pwm_right = max_speed;
-    if (pwm_left < -max_speed)
-      pwm_left = -max_speed;
-    if (pwm_right < -max_speed)
-      pwm_right = -max_speed;
-
-    //Serial.print("Motor Power: ");
-    //Serial.print(pwm_left);
-    //Serial.print("\t");
-    //Serial.println(pwm_right);
-
-    // Control motor
-    //pwm_out(pwm_left, pwm_right);
-    md.setSpeeds(pwm_left, pwm_right*wheel_rate_correction);
-  }
+  //Control motor
+  md.setSpeeds(pwm_left/5, pwm_right*wheel_rate_correction/5);
 }
 
-void displayYPR() {
-  // display Euler angles in degrees
-  mpu.dmpGetQuaternion(&q, fifoBuffer);
-  mpu.dmpGetGravity(&gravity, &q);
-  mpu.dmpGetYawPitchRoll(ypr, &q, &gravity);
-  Serial.print("ypr\t");
-  Serial.print(ypr[0] * 180/M_PI);
-  Serial.print("\t");
-  Serial.print(ypr[1] * 180/M_PI);
-  Serial.print("\t");
-  Serial.println(ypr[2] * 180/M_PI);
+const int xOffset = 0;
+const int zOffset = 0;
+void getPitch(double *pitch, int16_t *ax, int16_t *az) {
+  *pitch = -atan2(*ax, *az) - PI;
+  if (*pitch < -PI)
+    *pitch += 2*PI;
+}
+
+// Initializing IR pins and interrupts
+void init_IR()
+{
+  pinMode(2, INPUT);
+  pinMode(3, INPUT);
+  pinMode(4, INPUT);
+  pinMode(5, INPUT);
+  attachInterrupt(0, encoder_one, CHANGE);
+  attachInterrupt(1, encoder_two, CHANGE);
+}
+
+// IR interrupts for the quadrature encoders
+void encoder_one()
+{
+  // 0000, 0001, 0010, 0011, 0100, 0101, 0110, 0111,
+  // 1000, 1001, 1010, 1011, 1100, 1101, 1110, 1111
+  static int8_t lookup_table[] = {0,1,0,-1, -1,0,1,0, 0,1,0,-1, -1,0,1,0};
+  // Negative lookups correspond to the sensors moving with 2 leading
+  static uint8_t enc_val = 0;
+  
+  enc_val = enc_val << 2;
+  // PIND reads the first 8 digital pins (0-7)
+  uint8_t pins = (PIND & 0b00010100) >> 2; // Interrupt on 2, regular on 4 (interrupts available only on 2,3)
+  pins = (pins & 0b1) | ((pins >> 1) & 0b10);
+  enc_val = enc_val | pins;
+
+  leftEncoder += lookup_table[enc_val & 0b1111];
+  leftSteps += lookup_table[enc_val & 0b1111];
+  //Serial.print("Left position: ");
+  //Serial.println(leftEncoder);
+}
+
+void encoder_two()
+{
+  // 0000, 0001, 0010, 0011, 0100, 0101, 0110, 0111,
+  // 1000, 1001, 1010, 1011, 1100, 1101, 1110, 1111
+  static int8_t lookup_table[] = {0,1,0,-1, -1,0,1,0, 0,1,0,-1, -1,0,1,0};
+  // Negative lookups correspond to the sensors moving with 2 leading
+  static uint8_t enc_val = 0;
+  
+  enc_val = enc_val << 2;
+  // PIND reads the first 8 digital pins (0-7)
+  uint8_t pins = (PIND & 0b00101000) >> 3; // Interrupt on 3, regular on 5 (interrupts available only on 2,3)
+  pins = (pins & 0b1) | ((pins >> 1) & 0b10);
+  enc_val = enc_val | pins;
+
+  rightEncoder += lookup_table[enc_val & 0b1111];
+  rightSteps += lookup_table[enc_val & 0b1111];
+  //Serial.print("Right position: ");
+  //Serial.println(rightEncoder);
+}
+
+bool shouldUpdateCoords() {
+  return leftSteps + rightSteps >= stepsPerUpdate;
+}
+
+void updateCoords() {
+  float dsl = leftSteps * stepDistance;
+  float dsr = rightSteps * stepDistance;
+  float dsavg = (dsl + dsr) / 2;
+  float dTheta = (dsl - dsavg)/botRadius;
+
+  worldTheta += dTheta;
+  if (worldTheta > 2*PI)
+    worldTheta -= 2*PI;
+  if (worldTheta < 0)
+    worldTheta += 2*PI;
+  worldX += dsavg * cos(worldTheta); // Or [worldTheta - (dTheta/2)]
+  worldY += dsavg * sin(worldTheta);
 }
 
 void pwm_out(int l_val,int r_val)
@@ -275,3 +244,27 @@ void init_IO()
   pinMode(A2, INPUT);digitalWrite(A2, HIGH);
   pinMode(A3, INPUT);digitalWrite(A3, HIGH);
 }
+
+void printDeltaPWMEquation(float *deltaPWM, float *K, double *pitch, float *angle_ref, float *B, int16_t *gy)
+{
+  Serial.print(*deltaPWM);
+  Serial.print(" = ");
+  Serial.print(*K);
+  Serial.print(" * (");
+  Serial.print(*pitch);
+  Serial.print(" - ");
+  Serial.print(*angle_ref);
+  Serial.print(") - ");
+  Serial.print(*B);
+  Serial.print(" * (pi/180) * ");
+  Serial.print(*gy);
+  Serial.println();
+}
+
+void printPitchAngleAndSpeed(double *pitch, double *angular_rate) {
+  Serial.print("pitch, angular_rate = ");
+  Serial.print(*pitch);
+  Serial.print(", ");
+  Serial.println(*angular_rate);
+}
+
