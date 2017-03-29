@@ -95,6 +95,9 @@ void setup() {
 }
 
 void loop() {
+  if (shouldUpdateCoords())
+    updateCoords();
+  
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
   getPitch(&pitch, &ax, &az);
   // angle and angular rate unit: radian
@@ -102,7 +105,7 @@ void loop() {
   double angular_rate = PI*((double)gy)/180 - angular_rate_ref;     // converted to radians
   
   float deltaPWM = K*angle_err - B*angular_rate;
-  printAngleErrorAndSpeed(&angle_err, &angular_rate);
+  //printAngleErrorAndSpeed(&angle_err, &angular_rate);
   //printDeltaPWMEquation(&deltaPWM, &K, &pitch, &angle_ref, &B, &gy);
   
   pwm_left += deltaPWM;
@@ -112,7 +115,7 @@ void loop() {
   if (pwm_left > max_speed)
     pwm_left = max_speed;
   if (pwm_right > max_speed)
-    pwm_right = max_speed;
+    pwm_right = max_speed;            
   if (pwm_left < -max_speed)
     pwm_left = -max_speed;
   if (pwm_right < -max_speed)
@@ -187,8 +190,12 @@ bool shouldUpdateCoords() {
 }
 
 void updateCoords() {
+  Serial.print("------Steps = ");
+  Serial.println(leftSteps);
   float dsl = leftSteps * stepDistance;
+  leftSteps = 0; // Might have concurrency issues with the interrupt adding to this variable
   float dsr = rightSteps * stepDistance;
+  rightSteps = 0;
   float dsavg = (dsl + dsr) / 2;
   float dTheta = (dsl - dsavg)/botRadius;
 
@@ -239,5 +246,15 @@ void printAngleErrorAndSpeed(double *angle_err, double *angular_rate) {
   Serial.print(*angle_err);
   Serial.print(", ");
   Serial.println(*angular_rate);
+}
+
+void printWorldCoords() {
+  Serial.print("World coords (x, y, theta): (");
+  Serial.print(worldX);
+  Serial.print(", ");
+  Serial.print(worldY);
+  Serial.print(", ");
+  Serial.print(worldTheta);
+  Serial.println(")");
 }
 
