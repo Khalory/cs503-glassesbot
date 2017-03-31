@@ -38,7 +38,7 @@ const float botRadius = 1.375f;
 const float stepDistance = 2.0f * botRadius * PI / 64.0f;
 
 // World Coordinates
-float worldX = 0.0f;
+float worldX = 0.0f;  
 float worldY = 0.0f;
 float worldTheta = 0.0f;
 
@@ -49,14 +49,14 @@ float turn_velocity = 0.0f;
 // 45, 26 works best so far
 // 55, 38 was decent but wobly
 // 55, 25 is pretty pretty
-float K = 58.0f;
-float B = 36.0f;
-float angle_ref = 0.27f;
-float angular_rate_ref = 2.14f;
+float K = 13.0f;
+float B = 0.08f;
+float angle_ref = 0.01f;
+float angular_rate_ref = 0.15f;
 float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
-int pwm_left;
-int pwm_right;
+float pwm_left;
+float pwm_right;
 
 MPU6050 mpu;
 
@@ -100,13 +100,18 @@ void loop() {
   
   mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
   getPitch(&pitch, &ax, &az);
-  // angle and angular rate unit: radian
+  //Serial.print(ax);
+  //Serial.print(", ");
+  //Serial.println(az);
+  //angle and angular rate unit: radian
   double angle_err = pitch - angle_ref;               // angle_ref is center of gravity offset
   double angular_rate = PI*((double)gy)/180 - angular_rate_ref;     // converted to radians
   
-  float deltaPWM = K*angle_err - B*angular_rate;
+  float deltaPWM = -K*angle_err - B*angular_rate;
   //printAngleErrorAndSpeed(&angle_err, &angular_rate);
+  //printDeltaPWMComponents(&deltaPWM, &K, &pitch, &angle_ref, &B, &gy);
   //printDeltaPWMEquation(&deltaPWM, &K, &pitch, &angle_ref, &B, &gy);
+  //Serial.println(pwm_left);
   
   pwm_left += deltaPWM;
   pwm_right += deltaPWM;
@@ -121,16 +126,31 @@ void loop() {
   if (pwm_right < -max_speed)
     pwm_right = -max_speed;
 
+  float leftOut = pwm_left;
+  float rightOut = pwm_left;
+  if (leftOut < 0)
+    leftOut -= 20;
+  if (rightOut < 0)
+    rightOut -= 20;
+  if (leftOut > 0)
+    leftOut += 20;
+  if (rightOut > 0)
+    rightOut += 20;
+
   //Control motor
-  md.setSpeeds(pwm_left, pwm_right*wheel_rate_correction);
+  md.setSpeeds(leftOut, rightOut);
 }
 
+double pitchFlow = 1.0d;
+double integratedPitch = 0.0d;
 void getPitch(double *pitch, int16_t *ax, int16_t *az) {
   // Just using atan2 gives us an angle where a balanced position reads as either PI or -PI
   // Inverted so it's in the same direction as the gyro
   *pitch = -atan2(*ax, *az) - PI;
   if (*pitch < -PI)
     *pitch += 2*PI;
+  *pitch = (1.0d - pitchFlow) * integratedPitch + pitchFlow * (*pitch);
+  integratedPitch = *pitch;
 }
 
 // Initializing IR pins and interrupts
@@ -223,6 +243,16 @@ void init_IO()
   pinMode(A1, INPUT);digitalWrite(A1, HIGH);
   pinMode(A2, INPUT);digitalWrite(A2, HIGH);
   pinMode(A3, INPUT);digitalWrite(A3, HIGH);
+}
+
+void printDeltaPWMComponents(float *deltaPWM, float *K, double *pitch, float *angle_ref, float *B, int16_t *gy)
+{
+  Serial.print(*deltaPWM);
+  Serial.print(" = ");
+  Serial.print(-*K * (*pitch - *angle_ref));
+  Serial.print(" + ");
+  Serial.print(-*B * (PI/180) * (*gy));
+  Serial.println();
 }
 
 void printDeltaPWMEquation(float *deltaPWM, float *K, double *pitch, float *angle_ref, float *B, int16_t *gy)
