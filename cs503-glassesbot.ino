@@ -49,10 +49,10 @@ float turn_velocity = 0.0f;
 // 45, 26 works best so far
 // 55, 38 was decent but wobly
 // 55, 25 is pretty pretty
-float K = 13.0f;
-float B = 0.08f;
-float angle_ref = 0.01f;
-float angular_rate_ref = 0.15f;
+float K = 4.5f;
+float B = 0.13f;
+float angle_ref = 0.02f;
+float angular_rate_ref = 0.0f;
 float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
 float pwm_left;
@@ -73,7 +73,7 @@ DualMC33926MotorShield md;
 
 void setup() {
     // join I2C bus (I2Cdev library doesn't do this automatically)
-    #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIRE
+    #if I2CDEV_IMPLEMENTATION == I2CDEV_ARDUINO_WIREI
         Wire.begin();
         Wire.setClock(400000); // 400kHz I2C clock. Comment this line if having compilation difficulties
     #elif I2CDEV_IMPLEMENTATION == I2CDEV_BUILTIN_FASTWIRE
@@ -138,7 +138,9 @@ void loop() {
     rightOut += 20;
 
   //Control motor
-  md.setSpeeds(leftOut, rightOut);
+  //md.setSpeeds(leftOut, rightOut);
+  
+  printPIND();
 }
 
 double pitchFlow = 1.0d;
@@ -201,8 +203,8 @@ void encoder_two()
 
   rightEncoder += lookup_table[enc_val & 0b1111];
   rightSteps += lookup_table[enc_val & 0b1111];
-  //Serial.print("Right position: ");
-  //Serial.println(rightEncoder);
+  Serial.print("Right position: ");
+  Serial.println(rightEncoder);
 }
 
 bool shouldUpdateCoords() {
@@ -210,10 +212,12 @@ bool shouldUpdateCoords() {
 }
 
 void updateCoords() {
-  Serial.print("------Steps = ");
-  Serial.println(leftSteps);
+  Serial.print(leftEncoder);
+  Serial.print(" : ");
+  Serial.println(rightEncoder);
+  printWorldCoords();
   float dsl = leftSteps * stepDistance;
-  leftSteps = 0; // Might have concurrency issues with the interrupt adding to this variable
+  leftSteps = 0; // Might have concurrency issues with the interrupt adding to these variables
   float dsr = rightSteps * stepDistance;
   rightSteps = 0;
   float dsavg = (dsl + dsr) / 2;
@@ -286,5 +290,19 @@ void printWorldCoords() {
   Serial.print(", ");
   Serial.print(worldTheta);
   Serial.println(")");
+}
+
+// For debugging
+void printPIND()
+{
+  Serial.print((PIND & 0b10000000) >> 7);
+  Serial.print((PIND & 0b01000000) >> 6);
+  Serial.print((PIND & 0b00100000) >> 5);
+  Serial.print((PIND & 0b00010000) >> 4);
+  Serial.print((PIND & 0b00001000) >> 3);
+  Serial.print((PIND & 0b00000100) >> 2);
+  Serial.print((PIND & 0b00000010) >> 1);
+  Serial.print((PIND & 0b00000001));
+  Serial.println();
 }
 
