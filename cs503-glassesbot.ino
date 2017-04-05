@@ -18,7 +18,7 @@
 
 // Left encoder
 #define IR_1 2
-#define IR_2 4
+#define IR_2 6
 // Right encoder
 #define IR_3 3
 #define IR_4 5
@@ -139,8 +139,10 @@ void loop() {
 
   //Control motor
   //md.setSpeeds(leftOut, rightOut);
-  
-  printPIND();
+
+  //Serial.println(analogRead(A0));
+  analog_encoder_two();
+  //printPIND();
 }
 
 double pitchFlow = 1.0d;
@@ -162,8 +164,10 @@ void init_IR()
   pinMode(IR_2, INPUT);
   pinMode(IR_3, INPUT);
   pinMode(IR_4, INPUT);
+  pinMode(A0, INPUT);
+  pinMode(A1, INPUT);
   attachInterrupt(IR_INTERRUPT_1, encoder_one, CHANGE);
-  attachInterrupt(IR_INTERRUPT_2, encoder_two, CHANGE);
+  //attachInterrupt(IR_INTERRUPT_2, encoder_two, CHANGE);
 }
 
 // IR interrupts for the quadrature encoders
@@ -177,14 +181,47 @@ void encoder_one()
   
   enc_val = enc_val << 2;
   // PIND reads the first 8 digital pins (0-7)
-  uint8_t pins = (PIND & 0b00010100) >> 2; // Interrupt on 2, regular on 4 (interrupts available only on 2,3)
-  pins = (pins & 0b1) | ((pins >> 1) & 0b10);
+  uint8_t pins = (PIND & 0b01000100) >> 2; // Interrupt on 2, regular on 4 (interrupts available only on 2,3)
+  pins = (pins & 0b1) | ((pins >> 3) & 0b10);
   enc_val = enc_val | pins;
 
   leftEncoder += lookup_table[enc_val & 0b1111];
   leftSteps += lookup_table[enc_val & 0b1111];
   //Serial.print("Left position: ");
   //Serial.println(leftEncoder);
+}
+
+const int top_thresh = 19;
+const int bot_thresh = 15;
+void analog_encoder_two()
+{
+  // 0000, 0001, 0010, 0011, 0100, 0101, 0110, 0111,
+  // 1000, 1001, 1010, 1011, 1100, 1101, 1110, 1111
+  static int8_t lookup_table[] = {0,1,0,-1, -1,0,1,0, 0,1,0,-1, -1,0,1,0};
+  static uint8_t enc_val = 0;
+  int top = analogRead(A0);
+  if (top > bot_thresh && top < top_thresh)
+    return;
+  int top_bin = top > top_thresh ? 1 : 0;
+//  Serial.print(top_bin);
+//  Serial.print(",, ");
+//  Serial.println(enc_val);
+  int bot = analogRead(A1);
+//  Serial.print(top);
+//  Serial.print(", ");
+//  Serial.println(bot);
+  if (top_bin == (enc_val & 1))
+    return;
+
+  int bot_bin = bot > (top_thresh+bot_thresh)/2 ? 1 : 0;
+
+  uint8_t pins = top_bin | (bot_bin << 1);
+  enc_val = (enc_val << 2) | pins;
+  
+  rightEncoder += lookup_table[enc_val & 0b1111];
+  rightSteps += lookup_table[enc_val & 0b1111];
+  Serial.print("Right position: ");
+  Serial.println(rightEncoder);
 }
 
 void encoder_two()
@@ -208,14 +245,13 @@ void encoder_two()
 }
 
 bool shouldUpdateCoords() {
-  return leftSteps + rightSteps >= stepsPerUpdate;
+  return abs(leftSteps) + abs(rightSteps) >= stepsPerUpdate;
 }
 
 void updateCoords() {
   Serial.print(leftEncoder);
   Serial.print(" : ");
   Serial.println(rightEncoder);
-  printWorldCoords();
   float dsl = leftSteps * stepDistance;
   leftSteps = 0; // Might have concurrency issues with the interrupt adding to these variables
   float dsr = rightSteps * stepDistance;
@@ -230,6 +266,7 @@ void updateCoords() {
     worldTheta += 2*PI;
   worldX += dsavg * cos(worldTheta); // Or [worldTheta - (dTheta/2)]
   worldY += dsavg * sin(worldTheta);
+  printWorldCoords();
 }
 
 void init_IO()
@@ -243,10 +280,6 @@ void init_IO()
   pinMode(DIR_L2, OUTPUT);
   pinMode(DIR_R1, OUTPUT);//
   pinMode(DIR_R2, OUTPUT);
-  pinMode(A0, INPUT);digitalWrite(A0, HIGH);
-  pinMode(A1, INPUT);digitalWrite(A1, HIGH);
-  pinMode(A2, INPUT);digitalWrite(A2, HIGH);
-  pinMode(A3, INPUT);digitalWrite(A3, HIGH);
 }
 
 void printDeltaPWMComponents(float *deltaPWM, float *K, double *pitch, float *angle_ref, float *B, int16_t *gy)
