@@ -141,8 +141,11 @@ void loop() {
   //md.setSpeeds(leftOut, rightOut);
 
   //Serial.println(analogRead(A0));
-  analog_encoder_two();
-  //printPIND();
+//  analog_encoder_two();
+  //Serial.print(analogRead(A0));
+  //Serial.print(", ");
+//  Serial.println(analogRead(A1));
+  printPIND();
 }
 
 double pitchFlow = 1.0d;
@@ -193,6 +196,7 @@ void encoder_one()
 
 const int top_thresh = 19;
 const int bot_thresh = 15;
+int last_bot = 16;
 void analog_encoder_two()
 {
   // 0000, 0001, 0010, 0011, 0100, 0101, 0110, 0111,
@@ -200,20 +204,39 @@ void analog_encoder_two()
   static int8_t lookup_table[] = {0,1,0,-1, -1,0,1,0, 0,1,0,-1, -1,0,1,0};
   static uint8_t enc_val = 0;
   int top = analogRead(A0);
+  int bot = analogRead(A1);
+  static float bot_direction = 0;
+  bot_direction = .9f*(float)(bot - last_bot) + .1f*bot_direction;
   if (top > bot_thresh && top < top_thresh)
     return;
-  int top_bin = top > top_thresh ? 1 : 0;
-//  Serial.print(top_bin);
-//  Serial.print(",, ");
-//  Serial.println(enc_val);
-  int bot = analogRead(A1);
+  int top_bin = top >= top_thresh ? 1 : 0;
 //  Serial.print(top);
 //  Serial.print(", ");
 //  Serial.println(bot);
   if (top_bin == (enc_val & 1))
     return;
 
-  int bot_bin = bot > (top_thresh+bot_thresh)/2 ? 1 : 0;
+  int bot_bin = 0;
+  if (bot > bot_thresh && top < bot_thresh)
+    bot_bin = bot >= top_thresh ? 1 : 0;
+  else{
+    bot_bin = bot_direction > 0 ? 1 : 0;
+//    Serial.println(bot_direction);
+  }
+//  Serial.print(top_bin);
+//  Serial.print(",, ");
+//  Serial.println(bot);
+  if (top_bin == 1)
+    {
+      Serial.print("up: ");
+      Serial.println(bot);
+    }
+  if (top_bin == 0)
+    {
+      Serial.print("dn: ");
+      Serial.println(bot);
+    }
+
 
   uint8_t pins = top_bin | (bot_bin << 1);
   enc_val = (enc_val << 2) | pins;
@@ -249,9 +272,9 @@ bool shouldUpdateCoords() {
 }
 
 void updateCoords() {
-  Serial.print(leftEncoder);
-  Serial.print(" : ");
-  Serial.println(rightEncoder);
+//  Serial.print(leftEncoder);
+//  Serial.print(" : ");
+//  Serial.println(rightEncoder);
   float dsl = leftSteps * stepDistance;
   leftSteps = 0; // Might have concurrency issues with the interrupt adding to these variables
   float dsr = rightSteps * stepDistance;
@@ -266,7 +289,7 @@ void updateCoords() {
     worldTheta += 2*PI;
   worldX += dsavg * cos(worldTheta); // Or [worldTheta - (dTheta/2)]
   worldY += dsavg * sin(worldTheta);
-  printWorldCoords();
+//  printWorldCoords();
 }
 
 void init_IO()
