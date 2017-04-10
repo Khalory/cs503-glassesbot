@@ -45,15 +45,10 @@ float worldTheta = 0.0f;
 float translate_velocity = 0.0f;
 float turn_velocity = 0.0f;
 
-// 28, 22 work pretty well
-// 45, 26 works best so far
-// 55, 38 was decent but wobly
-// 55, 25 is pretty pretty
 float K = 4.5f;
 float B = 0.13f;
 float angle_ref = 0.02f;
 float angular_rate_ref = 0.0f;
-float wheel_rate_correction = 1.0f;//1.065f; // This gets multiplied by the wheel with more tilt so that we move straight
 
 float pwm_left;
 float pwm_right;
@@ -145,7 +140,7 @@ void loop() {
   //Serial.print(analogRead(A0));
   //Serial.print(", ");
 //  Serial.println(analogRead(A1));
-  printPIND();
+  //printPIND();
 }
 
 double pitchFlow = 1.0d;
